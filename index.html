@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>运动会报名统计工具</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  body {
+    font-family: "Microsoft YaHei", Arial, sans-serif;
+    margin: 20px;
+    background: #f7f7f7;
+    color: #222;
+    line-height: 1.7;
+  }
+  h1, h2, h3 { margin-top: 18px; }
+  .box {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  button {
+    padding: 8px 16px;
+    margin: 6px 6px 6px 0;
+    cursor: pointer;
+    border: 1px solid #999;
+    border-radius: 6px;
+    background: #eee;
+  }
+  button:hover { background: #e0e0e0; }
+  .warn { color: #b00020; font-weight: bold; }
+  .ok { color: #0a7a2f; font-weight: bold; }
+  .small { color: #666; font-size: 13px; }
+  .result-block {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .copy-area {
+    white-space: pre;
+    overflow-x: auto;
+    background: #fafafa;
+    border: 1px solid #ddd;
+    padding: 12px;
+    border-radius: 6px;
+    font-family: Consolas, "Microsoft YaHei", monospace;
+    font-size: 14px;
+  }
+
+  .top-copy-bar {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    background: #fffbe6;
+    border: 1px solid #e0c97a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  .top-copy-bar button {
+    background: #fff;
+    border: 1px solid #c9a227;
+    font-weight: bold;
+  }
+  .top-copy-bar button:hover {
+    background: #fff3c4;
+  }
+
+  .output-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 0;
+    padding: 0;
+    font-family: "宋体", SimSun, serif;
+  }
+  .output-table td {
+    border: none;
+    padding: 1px 2px;
+    vertical-align: top;
+    font-family: "宋体", SimSun, serif;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+  }
+</style>
+</head>
+<body>
+
+<h1>运动会报名统计工具</h1>
+
+<div class="top-copy-bar">
+  <b>快捷复制：</b>
+  <button onclick="copyText('table1Text')">复制表1</button>
+  <button onclick="copyText('table2Text')">复制表2</button>
+  <button onclick="copyRichHtml('classResult')">复制班级名单</button>
+  <button onclick="copyRichHtml('projectResult')">复制项目名单</button>
+</div>
+
+<div class="box">
+  <h3>1. 上传报名表</h3>
+  
+  <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+  <br>
+  <button onclick="run()">开始检查并统计</button>
+  <button onclick="clearAll()">清空结果</button>
+</div>
+
+<div class="result-block">
+  <h3>2. 检查结果</h3>
+  <div id="checkResult">尚未检查。</div>
+</div>
+
+<div class="result-block">
+  <h3>3. 表1：班级 + 班级报名人数（可复制粘贴到表格）</h3>
+  <pre id="table1Text" class="copy-area">尚未统计。</pre>
+</div>
+
+<div class="result-block">
+  <h3>4. 表2：组别 + 各项目报名人数（可复制粘贴到表格，无人数的用 /）</h3>
+  <pre id="table2Text" class="copy-area">尚未统计。</pre>
+</div>
+
+<div class="result-block">
+  <h3>5. 每个班级运动员名单 + 人数（一个表格，9列，每列1.9cm）</h3>
+  <div id="classResult">尚未统计。</div>
+</div>
+
+<div class="result-block">
+  <h3>6. 项目分组名单 + 项目总人数 + 组别人数（一个表格，9列，每列1.9cm）</h3>
+  <div id="projectResult">尚未统计。</div>
+</div>
+
+<script>
+/* ---------- 可单独设置的字号 ---------- */
+const FONT_FAMILY = "宋体";
+const FONT_SIZE_TITLE = "10.5pt";
+const FONT_SIZE_NAME = "10.5pt";
+const TABLE_COLS = 9;
+const COL_WIDTH_CM = "1.9cm";
+
+/* ---------- 项目定义：800米、1000米分开 ---------- */
+const PROJECT_ALIASES = {
+  "50米": ["50米"],
+  "100米": ["100米"],
+  "200米": ["200米"],
+  "400米": ["400米"],
+  "800米": ["800米"],
+  "1000米": ["1000米"],
+  "跳高": ["跳高"],
+  "跳远": ["跳远"],
+  "前掷实心球": ["前掷实心球", "实心球"],
+  "垒球": ["垒球"],
+  "4×100米接力": ["4×100米接力", "4x100米接力", "4*100米接力", "4×100", "4x100", "4*100"]
+};
+
+const PROJECT_ORDER = [
+  "50米","100米","200米","400米","800米","1000米",
+  "跳高","跳远","前掷实心球","垒球","4×100米接力"
+];
+
+let allRecords = [];
+let duplicateMessages = [];
+let teacherMap = {};
+
+/* ---------- 清洗工具 ---------- */
+function cleanText(v) {
+  return String(v == null ? "" : v)
+    .replace(/[\s\u3000\u00A0\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+}
+
+function clearAll() {
+  document.getElementById("checkResult").innerHTML = "尚未检查。";
+  document.getElementById("table1Text").textContent = "尚未统计。";
+  document.getElementById("table2Text").textContent = "尚未统计。";
+  document.getElementById("classResult").innerHTML = "尚未统计。";
+  document.getElementById("projectResult").innerHTML = "尚未统计。";
+  allRecords = [];
+  duplicateMessages = [];
+  teacherMap = {};
+}
+
+function run() {
+  clearAll();
+  const files = document.getElementById("fileInput").files;
+  if (!files || files.length === 0) {
+    alert("请先选择 Excel 文件。");
+    return;
+  }
+
+  const readers = [];
+  for (let i = 0; i < files.length; i++) {
+    readers.push(readFile(files[i]));
+  }
+
+  Promise.all(readers).then(() => {
+    mergeSameSheetSameName();
+    checkMaleFemaleDuplicateInSameFile();
+    renderCheckResult();
+    if (duplicateMessages.length === 0) {
+      renderClassResult();
+      renderProjectResult();
+      renderTable1();
+      renderTable2();
+    } else {
+      document.getElementById("classResult").innerHTML = "<p class='warn'>存在同一文件中男女表重复姓名，请先处理后重新上传。</p>";
+      document.getElementById("projectResult").innerHTML = "<p class='warn'>存在同一文件中男女表重复姓名，请先处理后重新上传。</p>";
+      document.getElementById("table1Text").textContent = "存在重复姓名，未生成表1。";
+      document.getElementById("table2Text").textContent = "存在重复姓名，未生成表2。";
+    }
+  }).catch(err => {
+    console.error(err);
+    alert("读取失败：" + err.message);
+  });
+}
+
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type: "array"});
+        wb.SheetNames.forEach(sheetName => {
+          const ws = wb.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: ""});
+
+          if (sheetName.includes("班主任") || file.name.includes("班主任")) {
+            parseTeacherSheet(rows);
+          } else {
+            parseSheet(file.name, sheetName, rows);
+          }
+        });
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function parseSheet(fileName, sheetName, rows) {
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const row = rows[i].map(v => String(v).trim());
+    if (row.includes("姓名") && row.includes("班级")) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+  if (headerRowIndex === -1) return;
+
+  const header = rows[headerRowIndex].map(v => String(v).trim());
+  const idxName = header.indexOf("姓名");
+  const idxClass = header.indexOf("班级");
+  const idxGroup = header.indexOf("组别");
+  if (idxName === -1 || idxClass === -1) return;
+
+  const projectCols = {};
+  header.forEach((h, idx) => {
+    for (const p of PROJECT_ORDER) {
+      if (PROJECT_ALIASES[p].some(alias => h.includes(alias))) {
+        projectCols[p] = idx;
+      }
+    }
+  });
+
+  let gender = "未知";
+  const sheetText = sheetName + " " + header.join(" ");
+  if (sheetText.includes("女子")) gender = "女";
+  else if (sheetText.includes("男子")) gender = "男";
+
+  for (let r = headerRowIndex + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+
+    const name = cleanText(row[idxName]);
+    const rawClassName = cleanText(row[idxClass]);
+    const rawGroup = idxGroup >= 0 ? cleanText(row[idxGroup]) : "";
+
+    if (!name || !rawClassName) continue;
+    if (name === "姓名" || rawClassName === "班级") continue;
+
+    const projects = new Set();
+    for (const p of PROJECT_ORDER) {
+      const col = projectCols[p];
+      if (col === undefined) continue;
+      const val = String(row[col] == null ? "" : row[col]).trim();
+      if (val !== "" && val !== " " && val !== "—") {
+        projects.add(p);
+      }
+    }
+
+    if (projects.size === 0) continue;
+
+    const className = normalizeClassName(rawClassName);
+    const group = normalizeGroupName(rawGroup, gender);
+
+    allRecords.push({
+      file: fileName,
+      sheet: sheetName,
+      gender,
+      className: className,
+      name,
+      group,
+      projects
+    });
+  }
+}
+
+function parseTeacherSheet(rows) {
+  if (!rows || rows.length === 0) return;
+
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i].map(v => cleanText(v));
+    if (row.includes("班级") && row.includes("姓名")) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) headerRowIndex = 0;
+
+  const header = rows[headerRowIndex].map(v => cleanText(v));
+  const idxClass = header.indexOf("班级");
+  const idxName = header.indexOf("姓名");
+
+  if (idxClass === -1 || idxName === -1) return;
+
+  for (let r = headerRowIndex + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+
+    const cls = cleanText(row[idxClass]);
+    const teacher = cleanText(row[idxName]);
+
+    if (!cls || !teacher) continue;
+    if (cls === "班级" || teacher === "姓名") continue;
+
+    const key = normalizeClassKey(cls);
+    if (key) {
+      teacherMap[key] = teacher;
+    }
+  }
+}
+
+function normalizeClassName(cls) {
+  let s = cleanText(cls);
+  s = s.replace(/\(/g, "（").replace(/\)/g, "）");
+
+  if (/（\d+）/.test(s)) return s;
+
+  let m = s.match(/^(.+?)(\d+)(班?)$/);
+  if (m) {
+    return `${m[1]}（${m[2]}）${m[3]}`;
+  }
+
+  m = s.match(/^(.+?)(\d+)(.*)$/);
+  if (m) {
+    return `${m[1]}（${m[2]}）${m[3]}`;
+  }
+
+  return s;
+}
+
+function normalizeClassKey(cls) {
+  let s = cleanText(cls);
+  s = s.replace(/[（）()]/g, "");
+  s = s.replace(/班/g, "");
+  s = s.replace(/年级/g, "");
+  return s;
+}
+
+function normalizeGroupName(group, gender) {
+  let g = cleanText(group);
+
+  if (!g) {
+    g = (gender === "男" ? "男子组" : gender === "女" ? "女子组" : "未知组");
+  }
+
+  if (/^低年级男子组$/.test(g)) return "小学低年级男子组";
+  if (/^低年级女子组$/.test(g)) return "小学低年级女子组";
+  if (/^高年级男子组$/.test(g)) return "小学高年级男子组";
+  if (/^高年级女子组$/.test(g)) return "小学高年级女子组";
+
+  g = g.replace(/^初一(?!年级)/, "初一年级");
+  g = g.replace(/^初二(?!年级)/, "初二年级");
+  g = g.replace(/^初三(?!年级)/, "初三年级");
+
+  g = g.replace(/^高一(?!年级)/, "高一年级");
+  g = g.replace(/^高二(?!年级)/, "高二年级");
+  g = g.replace(/^高三(?!年级)/, "高三年级");
+
+  return g;
+}
+
+function mergeSameSheetSameName() {
+  const map = {};
+  allRecords.forEach(rec => {
+    const key = rec.file + "||" + rec.sheet + "||" + rec.name;
+    if (!map[key]) {
+      map[key] = { ...rec, projects: new Set(rec.projects) };
+    } else {
+      rec.projects.forEach(p => map[key].projects.add(p));
+    }
+  });
+
+  allRecords = Object.values(map).map(rec => ({
+    ...rec,
+    projects: rec.projects
+  }));
+}
+
+function checkMaleFemaleDuplicateInSameFile() {
+  duplicateMessages = [];
+  const map = {};
+  allRecords.forEach(rec => {
+    if (rec.gender !== "男" && rec.gender !== "女") return;
+    const key = rec.file + "||" + rec.name;
+    if (!map[key]) map[key] = [];
+    map[key].push(rec);
+  });
+
+  Object.keys(map).forEach(key => {
+    const arr = map[key];
+    const hasMale = arr.some(r => r.gender === "男");
+    const hasFemale = arr.some(r => r.gender === "女");
+    if (hasMale && hasFemale) {
+      duplicateMessages.push(arr);
+    }
+  });
+}
+
+function renderCheckResult() {
+  const el = document.getElementById("checkResult");
+  if (duplicateMessages.length === 0) {
+    el.innerHTML = "<p class='ok'>检查通过：未发现同一文件中男女表重复姓名。可以开始统计。</p>";
+  } else {
+    let html = "<p class='warn'>发现同一文件中男女表重复姓名，请先核对：</p><ul>";
+    duplicateMessages.forEach(arr => {
+      const name = arr[0].name;
+      const file = arr[0].file;
+      html += `<li><b>${escapeHtml(file)}：${escapeHtml(name)}</b><ul>`;
+      arr.forEach(rec => {
+        html += `<li>工作表：${escapeHtml(rec.sheet)}；性别：${escapeHtml(rec.gender)}；班级：${escapeHtml(rec.className)}；组别：${escapeHtml(rec.group)}；项目：${Array.from(rec.projects).join("、")}</li>`;
+      });
+      html += "</ul></li>";
+    });
+    html += "</ul>";
+    el.innerHTML = html;
+  }
+}
+
+function renderTable1() {
+  const classMap = {};
+  allRecords.forEach(rec => {
+    const cls = rec.className;
+    if (!classMap[cls]) classMap[cls] = new Set();
+    classMap[cls].add(rec.name);
+  });
+
+  const classNames = Object.keys(classMap).sort((a, b) => classOrder(a) - classOrder(b));
+  let text = "班级\t参加人数\n";
+  classNames.forEach(cls => {
+    text += `${cls}\t${classMap[cls].size}\n`;
+  });
+  document.getElementById("table1Text").textContent = text;
+}
+
+function renderTable2() {
+  const projectMap = {};
+  PROJECT_ORDER.forEach(p => {
+    projectMap[p] = {};
+  });
+
+  allRecords.forEach(rec => {
+    const groupKey = rec.group || (rec.gender + "子组");
+    rec.projects.forEach(p => {
+      if (!projectMap[p]) projectMap[p] = {};
+      if (!projectMap[p][groupKey]) projectMap[p][groupKey] = new Set();
+      projectMap[p][groupKey].add(rec.name);
+    });
+  });
+
+  const allGroups = new Set();
+  PROJECT_ORDER.forEach(p => {
+    Object.keys(projectMap[p] || {}).forEach(g => allGroups.add(g));
+  });
+
+  const groupNames = Array.from(allGroups).sort((a, b) => groupOrder(a) - groupOrder(b));
+
+  let header = "组别";
+  PROJECT_ORDER.forEach(p => {
+    header += "\t" + p;
+  });
+  let text = header + "\n";
+
+  groupNames.forEach(g => {
+    let line = g;
+    PROJECT_ORDER.forEach(p => {
+      const set = projectMap[p] && projectMap[p][g] ? projectMap[p][g] : new Set();
+      line += "\t" + (set.size > 0 ? set.size : "/");
+    });
+    text += line + "\n";
+  });
+
+  document.getElementById("table2Text").textContent = text;
+}
+
+function buildTitleRow(text) {
+  return `<tr><td colspan="${TABLE_COLS}" style="font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:left;word-break:break-all;">${escapeHtml(text)}</td></tr>`;
+}
+
+/* 姓名居中 */
+function buildNameRows(names) {
+  let html = "";
+  for (let i = 0; i < names.length; i += TABLE_COLS) {
+    html += `<tr>`;
+    for (let j = 0; j < TABLE_COLS; j++) {
+      const name = names[i + j] || "";
+      html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(name)}</td>`;
+    }
+    html += `</tr>`;
+  }
+  return html;
+}
+
+/* 4×100米接力表头行：道次 | 班级 | 姓名（合并7列） */
+function buildRelayHeaderRow() {
+  let html = `<tr>`;
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">道次</td>`;
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">班级</td>`;
+  html += `<td colspan="${TABLE_COLS - 2}" style="font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">姓名</td>`;
+  html += `</tr>`;
+  return html;
+}
+
+/* 4×100米接力数据行：道次 + 班级 + 姓名（最多7个姓名） */
+function buildRelayRow(lane, cls, students) {
+  let html = `<tr>`;
+
+  // 第1列：道次
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${lane}</td>`;
+
+  // 第2列：班级
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(cls)}</td>`;
+
+  // 第3列到第9列：姓名
+  for (let i = 0; i < TABLE_COLS - 2; i++) {
+    const name = students[i] || "";
+    html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(name)}</td>`;
+  }
+
+  html += `</tr>`;
+  return html;
+}
+
+function numberToChinese(n) {
+  const map = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+  if (n <= 10) return map[n];
+  if (n < 20) return "十" + map[n - 10];
+  const tens = Math.floor(n / 10);
+  const ones = n % 10;
+  return map[tens] + "十" + (ones ? map[ones] : "");
+}
+
+function renderClassResult() {
+  const el = document.getElementById("classResult");
+
+  const classMap = {};
+  allRecords.forEach(rec => {
+    const cls = rec.className;
+    if (!classMap[cls]) classMap[cls] = new Map();
+    classMap[cls].set(rec.name, rec);
+  });
+
+  const classNames = Object.keys(classMap).sort((a, b) => classOrder(a) - classOrder(b));
+  let html = "";
+
+  html += `<table class="output-table" style="width:${9 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
+
+  classNames.forEach(cls => {
+    const names = Array.from(classMap[cls].keys());
+    const teacher = teacherMap[normalizeClassKey(cls)];
+    let title = "";
+    if (teacher) {
+      title = `${cls}　　领队：${teacher}　　${names.length}人`;
+    } else {
+      title = `${cls}　　${names.length}人`;
+    }
+    html += buildTitleRow(title);
+    html += buildNameRows(names);
+  });
+
+  html += `</table>`;
+
+  el.innerHTML = html || "<p>暂无数据。</p>";
+}
+
+function renderProjectResult() {
+  const el = document.getElementById("projectResult");
+
+  const projectMap = {};
+  PROJECT_ORDER.forEach(p => {
+    projectMap[p] = {};
+  });
+
+  allRecords.forEach(rec => {
+    const groupKey = rec.group || (rec.gender + "子组");
+    rec.projects.forEach(p => {
+      if (!projectMap[p]) projectMap[p] = {};
+      if (!projectMap[p][groupKey]) projectMap[p][groupKey] = new Map();
+      projectMap[p][groupKey].set(rec.name, rec);
+    });
+  });
+
+  let html = "";
+
+  html += `<table class="output-table" style="width:${9 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
+
+  PROJECT_ORDER.forEach((p, pIndex) => {
+    const groups = projectMap[p] || {};
+    const groupNames = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b));
+    let total = 0;
+    groupNames.forEach(g => total += groups[g].size);
+
+    const projectCn = numberToChinese(pIndex + 1);
+    html += buildTitleRow(`${projectCn}、${p}（项目总人数：${total}人）`);
+
+    if (p === "4×100米接力") {
+      // 4×100米接力特殊处理：按组别 -> 班级 -> 一行，道次从1开始
+      groupNames.forEach((g, idx) => {
+        const names = Array.from(groups[g].keys());
+        html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）`);
+
+        // 表头行：道次 | 班级 | 姓名（合并7列）
+        html += buildRelayHeaderRow();
+
+        // 按班级分组
+        const classMap = {};
+        names.forEach(name => {
+          const rec = groups[g].get(name);
+          const cls = rec.className;
+          if (!classMap[cls]) classMap[cls] = [];
+          classMap[cls].push(name);
+        });
+
+        const classNames = Object.keys(classMap).sort((a, b) => classOrder(a) - classOrder(b));
+
+        let lane = 1;
+        classNames.forEach(cls => {
+          const students = classMap[cls];
+          html += buildRelayRow(lane, cls, students);
+          lane++;
+        });
+      });
+    } else {
+      // 其他项目保持原来的 9 列姓名行格式
+      groupNames.forEach((g, idx) => {
+        const names = Array.from(groups[g].keys());
+        html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）`);
+        html += buildNameRows(names);
+      });
+    }
+  });
+
+  html += `</table>`;
+
+  el.innerHTML = html || "<p>暂无数据。</p>";
+}
+
+function copyText(id) {
+  const el = document.getElementById(id);
+  if (!el.textContent.trim()) {
+    alert("暂无内容可复制。");
+    return;
+  }
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    alert("已复制到剪贴板。");
+  }).catch(() => {
+    alert("复制失败，请手动选择复制。");
+  });
+}
+
+function copyRichHtml(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el || !el.innerText.trim()) {
+    alert("暂无内容可复制。");
+    return;
+  }
+
+  const temp = document.createElement("div");
+  temp.style.position = "fixed";
+  temp.style.left = "-99999px";
+  temp.style.top = "0";
+  temp.style.background = "#fff";
+  temp.style.padding = "0";
+  temp.style.margin = "0";
+  temp.style.fontFamily = FONT_FAMILY;
+  temp.style.fontSize = FONT_SIZE_NAME;
+  temp.innerHTML = el.innerHTML;
+  document.body.appendChild(temp);
+
+  const range = document.createRange();
+  range.selectNodeContents(temp);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  try {
+    const ok = document.execCommand("copy");
+    if (ok) {
+      alert("已复制，粘贴到 Word 时请选择“保留源格式”。");
+    } else {
+      alert("复制失败，请手动选择复制。");
+    }
+  } catch (e) {
+    alert("复制失败，请手动选择复制。");
+  }
+
+  sel.removeAllRanges();
+  document.body.removeChild(temp);
+}
+
+function parseClassInfo(cls) {
+  const s = normalizeClassName(cls);
+  let m = s.match(/高([一二三])/);
+  if (m) {
+    return { level: 3, grade: chineseNum(m[1]), classNo: parseClassNo(s) };
+  }
+  m = s.match(/初([一二三])/);
+  if (m) {
+    return { level: 2, grade: chineseNum(m[1]), classNo: parseClassNo(s) };
+  }
+  m = s.match(/([三四五六])/);
+  if (m) {
+    const grade = chineseNum(m[1]);
+    return { level: 1, grade: grade, classNo: parseClassNo(s), primaryHigh: grade >= 5 };
+  }
+  return { level: 9, grade: 9, classNo: 999 };
+}
+
+function parseClassNo(s) {
+  let m = s.match(/（(\d+)）/);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/(\d+)班/);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/(\d+)/);
+  if (m) return parseInt(m[1], 10);
+  return 999;
+}
+
+function chineseNum(ch) {
+  const map = { "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6 };
+  return map[ch] || 99;
+}
+
+function classOrder(cls) {
+  const info = parseClassInfo(cls);
+  let primaryGroup = 0;
+  if (info.level === 1) {
+    primaryGroup = info.primaryHigh ? 1 : 0;
+  }
+  return info.level * 100000 + primaryGroup * 10000 + info.grade * 100 + info.classNo;
+}
+
+function groupOrder(a, b) {
+  const ia = parseGroupInfo(a);
+  const ib = parseGroupInfo(b);
+  return groupKey(ia) - groupKey(ib);
+}
+
+function parseGroupInfo(g) {
+  const s = cleanText(g);
+  let level = 9, grade = 9, gender = 9;
+
+  if (s.includes("小学低年级")) { level = 0; grade = 1; }
+  else if (s.includes("小学高年级")) { level = 0; grade = 2; }
+  else if (s.includes("初一年级")) { level = 1; grade = 1; }
+  else if (s.includes("初二年级")) { level = 1; grade = 2; }
+  else if (s.includes("初三年级")) { level = 1; grade = 3; }
+  else if (s.includes("高一年级")) { level = 2; grade = 1; }
+  else if (s.includes("高二年级")) { level = 2; grade = 2; }
+  else if (s.includes("高三年级")) { level = 2; grade = 3; }
+
+  if (s.includes("男子")) gender = 1;
+  else if (s.includes("女子")) gender = 2;
+
+  return { level, grade, gender };
+}
+
+function groupKey(info) {
+  return info.level * 10000 + info.grade * 100 + info.gender;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[m]));
+}
+</script>
+
+</body>
+</html>
