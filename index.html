@@ -101,8 +101,7 @@
 
 <div class="box">
   <h3>1. 上传报名表</h3>
-  
-  <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
   <br>
   <button onclick="run()">开始检查并统计</button>
   <button onclick="clearAll()">清空结果</button>
@@ -531,32 +530,25 @@ function buildNameRows(names) {
   return html;
 }
 
-/* 4×100米接力表头行：道次 | 班级 | 姓名（合并7列） */
+/* 4×100米接力：8列表头 */
 function buildRelayHeaderRow() {
+  const heads = ["组/道次", "一", "二", "三", "四", "五", "六", "七"];
   let html = `<tr>`;
-  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">道次</td>`;
-  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">班级</td>`;
-  html += `<td colspan="${TABLE_COLS - 2}" style="font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">姓名</td>`;
+  heads.forEach(h => {
+    html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:center;word-break:break-all;">${h}</td>`;
+  });
   html += `</tr>`;
   return html;
 }
 
-/* 4×100米接力数据行：道次 + 班级 + 姓名（最多7个姓名） */
-function buildRelayRow(lane, cls, students) {
+/* 4×100米接力：数据行，8列，第1列编号，后面填班级 */
+function buildRelayClassRow(index, classList) {
   let html = `<tr>`;
-
-  // 第1列：道次
-  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${lane}</td>`;
-
-  // 第2列：班级
-  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(cls)}</td>`;
-
-  // 第3列到第9列：姓名
-  for (let i = 0; i < TABLE_COLS - 2; i++) {
-    const name = students[i] || "";
-    html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(name)}</td>`;
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${index}</td>`;
+  for (let i = 0; i < 7; i++) {
+    const cls = classList[i] || "";
+    html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(cls)}</td>`;
   }
-
   html += `</tr>`;
   return html;
 }
@@ -634,31 +626,30 @@ function renderProjectResult() {
     html += buildTitleRow(`${projectCn}、${p}（项目总人数：${total}人）`);
 
     if (p === "4×100米接力") {
-      // 4×100米接力特殊处理：按组别 -> 班级 -> 一行，道次从1开始
+      // 4×100米接力：只显示班级，8列
       groupNames.forEach((g, idx) => {
         const names = Array.from(groups[g].keys());
         html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）`);
 
-        // 表头行：道次 | 班级 | 姓名（合并7列）
+        // 表头行
         html += buildRelayHeaderRow();
 
-        // 按班级分组
-        const classMap = {};
+        // 取该组别内所有班级，去重后按班级顺序排
+        const classSet = new Set();
         names.forEach(name => {
           const rec = groups[g].get(name);
-          const cls = rec.className;
-          if (!classMap[cls]) classMap[cls] = [];
-          classMap[cls].push(name);
+          classSet.add(rec.className);
         });
 
-        const classNames = Object.keys(classMap).sort((a, b) => classOrder(a) - classOrder(b));
+        const classList = Array.from(classSet).sort((a, b) => classOrder(a) - classOrder(b));
 
-        let lane = 1;
-        classNames.forEach(cls => {
-          const students = classMap[cls];
-          html += buildRelayRow(lane, cls, students);
-          lane++;
-        });
+        // 每7个班级一行
+        let rowIndex = 1;
+        for (let i = 0; i < classList.length; i += 7) {
+          const chunk = classList.slice(i, i + 7);
+          html += buildRelayClassRow(rowIndex, chunk);
+          rowIndex++;
+        }
       });
     } else {
       // 其他项目保持原来的 9 列姓名行格式
