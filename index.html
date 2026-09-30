@@ -101,7 +101,16 @@
 
 <div class="box">
   <h3>1. 上传报名表</h3>
-    <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+  <p class="small">
+    可一次选择多个 Excel 文件。规则：单表内同名合并项目；同一文件中男女表同名才提示。
+    班级名称中的括号统一用中文全角括号（），没有括号的自动补括号。
+    人名、班级、组别中的所有空白字符都会去掉。
+    组别名称保留“年级”两个字；没有“年级”的会自动补上；低年级男子组自动视为小学低年级男子组，高年级男子组自动视为小学高年级男子组。
+    800米和1000米算两个独立项目。
+    如果有“班主任名单”工作表或文件，班级名单中会自动加入“领队：班主任姓名”。
+    排序：小学低年级→小学高年级→初一年级→初二年级→初三年级→高一年级→高二年级→高三年级；每组内先男后女。
+  </p>
+  <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
   <br>
   <button onclick="run()">开始检查并统计</button>
   <button onclick="clearAll()">清空结果</button>
@@ -530,7 +539,7 @@ function buildNameRows(names) {
   return html;
 }
 
-/* 4×100米接力：8列表头 */
+/* 4×100米接力：表头行 */
 function buildRelayHeaderRow() {
   const heads = ["组/道次", "一", "二", "三", "四", "五", "六", "七"];
   let html = `<tr>`;
@@ -541,14 +550,22 @@ function buildRelayHeaderRow() {
   return html;
 }
 
-/* 4×100米接力：数据行，8列，第1列编号，后面填班级 */
+/* 4×100米接力：数据行，道次一留空，从道次二开始填班级 */
 function buildRelayClassRow(index, classList) {
   let html = `<tr>`;
+
+  // 第1列：组/道次编号
   html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${index}</td>`;
-  for (let i = 0; i < 7; i++) {
+
+  // 第2列：道次一留空
+  html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;"></td>`;
+
+  // 第3—8列：道次二到道次七，最多6个班级
+  for (let i = 0; i < 6; i++) {
     const cls = classList[i] || "";
     html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(cls)}</td>`;
   }
+
   html += `</tr>`;
   return html;
 }
@@ -626,15 +643,12 @@ function renderProjectResult() {
     html += buildTitleRow(`${projectCn}、${p}（项目总人数：${total}人）`);
 
     if (p === "4×100米接力") {
-      // 4×100米接力：只显示班级，8列
       groupNames.forEach((g, idx) => {
         const names = Array.from(groups[g].keys());
         html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）`);
 
-        // 表头行
         html += buildRelayHeaderRow();
 
-        // 取该组别内所有班级，去重后按班级顺序排
         const classSet = new Set();
         names.forEach(name => {
           const rec = groups[g].get(name);
@@ -643,16 +657,26 @@ function renderProjectResult() {
 
         const classList = Array.from(classSet).sort((a, b) => classOrder(a) - classOrder(b));
 
-        // 每7个班级一行
+        // 4×100米接力：道次一留空，从道次二开始排，每行最多6个班级
+        // 如果最后一行只有1个班，就并入上一行，保证每组至少2队
+        const perRow = 6;
+        const rows = [];
+        for (let i = 0; i < classList.length; i += perRow) {
+          rows.push(classList.slice(i, i + perRow));
+        }
+
+        if (rows.length >= 2 && rows[rows.length - 1].length === 1) {
+          const last = rows.pop();
+          rows[rows.length - 1] = rows[rows.length - 1].concat(last);
+        }
+
         let rowIndex = 1;
-        for (let i = 0; i < classList.length; i += 7) {
-          const chunk = classList.slice(i, i + 7);
+        rows.forEach(chunk => {
           html += buildRelayClassRow(rowIndex, chunk);
           rowIndex++;
-        }
+        });
       });
     } else {
-      // 其他项目保持原来的 9 列姓名行格式
       groupNames.forEach((g, idx) => {
         const names = Array.from(groups[g].keys());
         html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）`);
