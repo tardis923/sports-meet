@@ -103,7 +103,7 @@
   <h3>1. 上传报名表</h3>
   <p class="small">
     可一次选择多个 Excel 文件。规则：单表内同名合并项目；同一文件中男女表同名才提示。
-    班级名称中的括号统一用中文全角括号（），没有括号的自动补括号。
+    班级名称中的括号统一用中文全角括号（），没有括号的自动补括号；没有“班”字的自动补“班”。
     人名、班级、组别中的所有空白字符都会去掉。
     组别名称保留“年级”两个字；没有“年级”的会自动补上；低年级男子组自动视为小学低年级男子组，高年级男子组自动视为小学高年级男子组。
     800米和1000米算两个独立项目。
@@ -149,19 +149,19 @@ const FONT_SIZE_NAME = "10.5pt";
 const TABLE_COLS = 9;
 const COL_WIDTH_CM = "1.9cm";
 
-/* ---------- 项目定义：800米、1000米分开 ---------- */
+/* ---------- 项目定义：800米、1000米分开；100米与4×100米接力严格独立 ---------- */
 const PROJECT_ALIASES = {
-  "50米": ["50米"],
-  "100米": ["100米"],
-  "200米": ["200米"],
-  "400米": ["400米"],
-  "800米": ["800米"],
-  "1000米": ["1000米"],
+  "50米": ["50米", "50M", "50m"],
+  "100米": ["100米", "100M", "100m", "100米跑"],
+  "200米": ["200米", "200M", "200m", "200米跑"],
+  "400米": ["400米", "400M", "400m", "400米跑"],
+  "800米": ["800米", "800M", "800m"],
+  "1000米": ["1000米", "1000M", "1000m"],
   "跳高": ["跳高"],
-  "跳远": ["跳远"],
-  "前掷实心球": ["前掷实心球", "实心球"],
+  "跳远": ["跳远", "立定跳远"],
+  "前掷实心球": ["前掷实心球", "实心球", "双手头上前掷实心球"],
   "垒球": ["垒球"],
-  "4×100米接力": ["4×100米接力", "4x100米接力", "4*100米接力", "4×100", "4x100", "4*100"]
+  "4×100米接力": ["4×100米接力", "4x100米接力", "4X100米接力", "4*100米接力", "4×100", "4x100", "4X100", "4*100"]
 };
 
 const PROJECT_ORDER = [
@@ -178,6 +178,33 @@ function cleanText(v) {
   return String(v == null ? "" : v)
     .replace(/[\s\u3000\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
+}
+
+/* ---------- 判断是否为报名标记（白名单式） ---------- */
+function isSignupMark(val) {
+  if (val == null) return false;
+
+  const s = cleanText(val);
+
+  if (s === "") return false;
+  if (s === "—") return false;
+  if (s === "-") return false;
+  if (s === "/") return false;
+  if (s === "无") return false;
+  if (s === "不参加") return false;
+  if (s === "否") return false;
+
+  if (/^0(\.0+)?$/.test(s)) return false;
+  if (s.toLowerCase() === "false") return false;
+
+  const marks = ["√", "✔", "✓", "☑", "✅", "🗸", "Y", "y", "是", "参加", "1"];
+  if (marks.includes(s)) return true;
+  if (/[√✔✓☑✅🗸]/.test(s)) return true;
+  if (/^1(\.0+)?$/.test(s)) return true;
+  if (s.toLowerCase() === "true") return true;
+
+  // 其他非空内容，默认算报名
+  return true;
 }
 
 function clearAll() {
@@ -252,44 +279,92 @@ function readFile(file) {
   });
 }
 
+/* ---------- 项目列识别：精确匹配优先 → 最长别名优先 → 一列只归一个项目 ---------- */
+function buildProjectCols(header) {
+  const projectCols = {};
+
+  // 第一步：精确匹配（表头文字完全等于某个别名）
+  header.forEach((h, idx) => {
+    const headerText = cleanText(h);
+    for (const p of PROJECT_ORDER) {
+      if (projectCols[p] !== undefined) continue;
+      if (PROJECT_ALIASES[p].some(alias => headerText === alias)) {
+        projectCols[p] = idx;
+        return;
+      }
+    }
+  });
+
+  // 第二步：包含匹配，按别名长度从长到短，避免短别名抢长别名
+  header.forEach((h, idx) => {
+    const headerText = cleanText(h);
+
+    // 如果这一列已经被占用，跳过
+    if (Object.values(projectCols).includes(idx)) return;
+
+    const candidates = [];
+    for (const p of PROJECT_ORDER) {
+      if (projectCols[p] !== undefined) continue;
+      for (const alias of PROJECT_ALIASES[p]) {
+        if (headerText.includes(alias)) {
+          candidates.push({ project: p, alias: alias, aliasLen: alias.length });
+        }
+      }
+    }
+
+    if (candidates.length === 0) return;
+
+    candidates.sort((a, b) => b.aliasLen - a.aliasLen);
+    projectCols[candidates[0].project] = idx;
+  });
+
+  return projectCols;
+}
+
 function parseSheet(fileName, sheetName, rows) {
   let headerRowIndex = -1;
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const row = rows[i].map(v => String(v).trim());
-    if (row.includes("姓名") && row.includes("班级")) {
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
+    const row = rows[i].map(v => cleanText(v));
+    const hasName = row.some(v => v.includes("姓名") || v === "名");
+    const hasClass = row.some(v => v.includes("班级") || v === "班");
+    if (hasName && hasClass) {
       headerRowIndex = i;
       break;
     }
   }
   if (headerRowIndex === -1) return;
 
-  const header = rows[headerRowIndex].map(v => String(v).trim());
-  const idxName = header.indexOf("姓名");
-  const idxClass = header.indexOf("班级");
-  const idxGroup = header.indexOf("组别");
+  const header = rows[headerRowIndex].map(v => cleanText(v));
+  const idxName = header.findIndex(h => h.includes("姓名") || h === "名");
+  const idxClass = header.findIndex(h => h.includes("班级") || h === "班");
+  const idxGroup = header.findIndex(h => h.includes("组别") || h.includes("组"));
+
   if (idxName === -1 || idxClass === -1) return;
 
-  const projectCols = {};
-  header.forEach((h, idx) => {
-    for (const p of PROJECT_ORDER) {
-      if (PROJECT_ALIASES[p].some(alias => h.includes(alias))) {
-        projectCols[p] = idx;
-      }
-    }
-  });
+  const projectCols = buildProjectCols(header);
 
   let gender = "未知";
   const sheetText = sheetName + " " + header.join(" ");
   if (sheetText.includes("女子")) gender = "女";
   else if (sheetText.includes("男子")) gender = "男";
 
+  let lastClass = "";
+  let lastGroup = "";
+
   for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.length === 0) continue;
 
     const name = cleanText(row[idxName]);
-    const rawClassName = cleanText(row[idxClass]);
-    const rawGroup = idxGroup >= 0 ? cleanText(row[idxGroup]) : "";
+    let rawClassName = cleanText(row[idxClass]);
+    let rawGroup = idxGroup >= 0 ? cleanText(row[idxGroup]) : "";
+
+    // 处理合并单元格：班级/组别为空时沿用上一行
+    if (!rawClassName && lastClass) rawClassName = lastClass;
+    if (rawClassName) lastClass = rawClassName;
+
+    if (!rawGroup && lastGroup) rawGroup = lastGroup;
+    if (rawGroup) lastGroup = rawGroup;
 
     if (!name || !rawClassName) continue;
     if (name === "姓名" || rawClassName === "班级") continue;
@@ -299,7 +374,7 @@ function parseSheet(fileName, sheetName, rows) {
       const col = projectCols[p];
       if (col === undefined) continue;
       const val = String(row[col] == null ? "" : row[col]).trim();
-      if (val !== "" && val !== " " && val !== "—") {
+      if (isSignupMark(val)) {
         projects.add(p);
       }
     }
@@ -358,20 +433,34 @@ function parseTeacherSheet(rows) {
   }
 }
 
+/* 班级名称统一：英文括号转中文，没有括号的自动补括号，没有“班”的自动补“班” */
 function normalizeClassName(cls) {
   let s = cleanText(cls);
   s = s.replace(/\(/g, "（").replace(/\)/g, "）");
 
-  if (/（\d+）/.test(s)) return s;
+  if (/（\d+）/.test(s)) {
+    if (!s.endsWith("班")) {
+      s = s + "班";
+    }
+    return s;
+  }
 
   let m = s.match(/^(.+?)(\d+)(班?)$/);
   if (m) {
-    return `${m[1]}（${m[2]}）${m[3]}`;
+    let result = `${m[1]}（${m[2]}）${m[3]}`;
+    if (!result.endsWith("班")) {
+      result = result + "班";
+    }
+    return result;
   }
 
   m = s.match(/^(.+?)(\d+)(.*)$/);
   if (m) {
-    return `${m[1]}（${m[2]}）${m[3]}`;
+    let result = `${m[1]}（${m[2]}）${m[3]}`;
+    if (!result.endsWith("班")) {
+      result = result + "班";
+    }
+    return result;
   }
 
   return s;
@@ -411,7 +500,7 @@ function normalizeGroupName(group, gender) {
 function mergeSameSheetSameName() {
   const map = {};
   allRecords.forEach(rec => {
-    const key = rec.file + "||" + rec.sheet + "||" + rec.name;
+    const key = rec.file + "||" + rec.sheet + "||" + rec.className + "||" + rec.name;
     if (!map[key]) {
       map[key] = { ...rec, projects: new Set(rec.projects) };
     } else {
@@ -525,7 +614,6 @@ function buildTitleRow(text) {
   return `<tr><td colspan="${TABLE_COLS}" style="font-family:${FONT_FAMILY};font-size:${FONT_SIZE_TITLE};font-weight:bold;border:none;padding:2px 2px;text-align:left;word-break:break-all;">${escapeHtml(text)}</td></tr>`;
 }
 
-/* 姓名居中 */
 function buildNameRows(names) {
   let html = "";
   for (let i = 0; i < names.length; i += TABLE_COLS) {
@@ -539,7 +627,7 @@ function buildNameRows(names) {
   return html;
 }
 
-/* 4×100米接力：表头行 */
+/* 4×100米接力：表头行（8列） */
 function buildRelayHeaderRow() {
   const heads = ["组/道次", "一", "二", "三", "四", "五", "六", "七"];
   let html = `<tr>`;
@@ -550,11 +638,11 @@ function buildRelayHeaderRow() {
   return html;
 }
 
-/* 4×100米接力：数据行，道次一留空，从道次二开始填班级 */
+/* 4×100米接力：数据行，道次一留空，从道次二开始填班级（最多6个班） */
 function buildRelayClassRow(index, classList) {
   let html = `<tr>`;
 
-  // 第1列：组/道次编号
+  // 第1列：组号
   html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${index}</td>`;
 
   // 第2列：道次一留空
@@ -568,6 +656,25 @@ function buildRelayClassRow(index, classList) {
 
   html += `</tr>`;
   return html;
+}
+
+/* 接力分组：每行最多6个班，最后一行若只有1个班，则从上一行挪1个下来 */
+function splitRelayGroups(classList) {
+  const perRow = 6;
+  const rows = [];
+  for (let i = 0; i < classList.length; i += perRow) {
+    rows.push(classList.slice(i, i + perRow));
+  }
+
+  // 如果最后一行只有1个班，且总行数≥2，从上一行挪1个到最后一组
+  if (rows.length >= 2 && rows[rows.length - 1].length === 1) {
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    // 从上一行末尾拿1个，放到最后一组开头
+    last.unshift(prev.pop());
+  }
+
+  return rows;
 }
 
 function numberToChinese(n) {
@@ -657,18 +764,8 @@ function renderProjectResult() {
 
         const classList = Array.from(classSet).sort((a, b) => classOrder(a) - classOrder(b));
 
-        // 4×100米接力：道次一留空，从道次二开始排，每行最多6个班级
-        // 如果最后一行只有1个班，就并入上一行，保证每组至少2队
-        const perRow = 6;
-        const rows = [];
-        for (let i = 0; i < classList.length; i += perRow) {
-          rows.push(classList.slice(i, i + perRow));
-        }
-
-        if (rows.length >= 2 && rows[rows.length - 1].length === 1) {
-          const last = rows.pop();
-          rows[rows.length - 1] = rows[rows.length - 1].concat(last);
-        }
+        // 使用修复后的分组逻辑
+        const rows = splitRelayGroups(classList);
 
         let rowIndex = 1;
         rows.forEach(chunk => {
@@ -785,10 +882,9 @@ function classOrder(cls) {
   return info.level * 100000 + primaryGroup * 10000 + info.grade * 100 + info.classNo;
 }
 
-function groupOrder(a, b) {
-  const ia = parseGroupInfo(a);
-  const ib = parseGroupInfo(b);
-  return groupKey(ia) - groupKey(ib);
+function groupOrder(a) {
+  const info = parseGroupInfo(a);
+  return groupKey(info);
 }
 
 function parseGroupInfo(g) {
