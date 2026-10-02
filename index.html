@@ -683,9 +683,13 @@ function renderProjectResult() {
 
         // 该组别内去重后的班级数量 = 队伍数量
         const teamCount = new Set(names.map(name => groups[g].get(name).className)).size;
-        const teamText = `　　　　${teamCount}队1组取前${teamCount - 1}名`;
-
-        html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）${teamText}`);
+let teamText = "";
+if (teamCount > 3) {
+  teamText = `　　　　${teamCount}队1组取前${teamCount - 1}名`;
+} else {
+  teamText = `　　　　${teamCount}队1组，全部录取并评定1-${teamCount}名`;
+}
+html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）${teamText}`);
 
         html += buildRelayHeaderRow();
 
