@@ -101,16 +101,7 @@
 
 <div class="box">
   <h3>1. 上传报名表</h3>
-  <p class="small">
-    可一次选择多个 Excel 文件。规则：单表内同名合并项目；同一文件中男女表同名才提示。
-    班级名称中的括号统一用中文全角括号（），没有括号的自动补括号；没有“班”字的自动补“班”。
-    人名、班级、组别中的所有空白字符都会去掉。
-    组别名称保留“年级”两个字；没有“年级”的会自动补上；低年级男子组自动视为小学低年级男子组，高年级男子组自动视为小学高年级男子组。
-    800米和1000米算两个独立项目。
-    如果有“班主任名单”工作表或文件，班级名单中会自动加入“领队：班主任姓名”。
-    排序：小学低年级→小学高年级→初一年级→初二年级→初三年级→高一年级→高二年级→高三年级；每组内先男后女。
-  </p>
-  <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+   <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
   <br>
   <button onclick="run()">开始检查并统计</button>
   <button onclick="clearAll()">清空结果</button>
