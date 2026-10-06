@@ -101,7 +101,8 @@
 
 <div class="box">
   <h3>1. 上传报名表</h3>
-   <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+  
+  <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
   <br>
   <button onclick="run()">开始检查并统计</button>
   <button onclick="clearAll()">清空结果</button>
@@ -113,22 +114,22 @@
 </div>
 
 <div class="result-block">
-  <h3>3. 表1：班级 + 班级报名人数（可复制粘贴到表格）</h3>
+  <h3>3. 表1：班级 + 班级报名人数</h3>
   <pre id="table1Text" class="copy-area">尚未统计。</pre>
 </div>
 
 <div class="result-block">
-  <h3>4. 表2：组别 + 各项目报名人数（可复制粘贴到表格，无人数的用 /）</h3>
+  <h3>4. 表2：组别 + 各项目报名人数</h3>
   <pre id="table2Text" class="copy-area">尚未统计。</pre>
 </div>
 
 <div class="result-block">
-  <h3>5. 每个班级运动员名单 + 人数（一个表格，9列，每列1.9cm）</h3>
+  <h3>5. 班级运动员名单</h3>
   <div id="classResult">尚未统计。</div>
 </div>
 
 <div class="result-block">
-  <h3>6. 项目分组名单 + 项目总人数 + 组别人数（一个表格，9列，每列1.9cm）</h3>
+  <h3>6. 项目分组名单</h3>
   <div id="projectResult">尚未统计。</div>
 </div>
 
@@ -140,29 +141,23 @@ const FONT_SIZE_NAME = "10.5pt";
 const TABLE_COLS = 9;
 const COL_WIDTH_CM = "1.9cm";
 
-/* ---------- 项目定义：800米、1000米分开 ---------- */
-const PROJECT_ALIASES = {
-  "50米": ["50米", "50M", "50m"],
-  "100米": ["100米", "100M", "100m", "100米跑"],
-  "200米": ["200米", "200M", "200m", "200米跑"],
-  "400米": ["400米", "400M", "400m", "400米跑"],
-  "800米": ["800米", "800M", "800m"],
-  "1000米": ["1000米", "1000M", "1000m"],
-  "跳高": ["跳高"],
-  "跳远": ["跳远", "立定跳远"],
-  "前掷实心球": ["前掷实心球", "实心球", "双手头上前掷实心球"],
-  "垒球": ["垒球"],
-  "4×100米接力": ["4×100米接力", "4x100米接力", "4*100米接力", "4×100", "4x100", "4*100"]
-};
+/* ---------- 忽略列：这些列不是项目列 ---------- */
+const IGNORE_HEADERS = [
+  "序号", "姓名", "班级", "组别", "备注", "成绩", "名次", "时间", "总分", "得分", "积分",
+  "班主任", "领队", "编号", "学号", "性别", "男子", "女子", "组", "项目"
+];
 
-const PROJECT_ORDER = [
+/* ---------- 项目排序优先级（用于展示顺序） ---------- */
+const PROJECT_PRIORITY = [
   "50米","100米","200米","400米","800米","1000米",
   "跳高","跳远","前掷实心球","垒球","4×100米接力"
 ];
 
+/* ---------- 全局数据 ---------- */
 let allRecords = [];
 let duplicateMessages = [];
 let teacherMap = {};
+let dynamicProjects = new Set();
 
 /* ---------- 清洗工具 ---------- */
 function cleanText(v) {
@@ -201,6 +196,7 @@ function clearAll() {
   allRecords = [];
   duplicateMessages = [];
   teacherMap = {};
+  dynamicProjects = new Set();
 }
 
 function run() {
@@ -281,13 +277,19 @@ function parseSheet(fileName, sheetName, rows) {
   const idxGroup = header.indexOf("组别");
   if (idxName === -1 || idxClass === -1) return;
 
+  // 动态识别项目列
   const projectCols = {};
   header.forEach((h, idx) => {
-    for (const p of PROJECT_ORDER) {
-      if (PROJECT_ALIASES[p].some(alias => h.includes(alias))) {
-        projectCols[p] = idx;
-      }
-    }
+    const headerName = cleanText(h);
+    if (!headerName) return;
+    if (IGNORE_HEADERS.includes(headerName)) return;
+
+    // 排除姓名、班级、组别所在列
+    if (idx === idxName || idx === idxClass || idx === idxGroup) return;
+
+    // 作为项目列
+    projectCols[headerName] = idx;
+    dynamicProjects.add(headerName);
   });
 
   let gender = "未知";
@@ -307,9 +309,8 @@ function parseSheet(fileName, sheetName, rows) {
     if (name === "姓名" || rawClassName === "班级") continue;
 
     const projects = new Set();
-    for (const p of PROJECT_ORDER) {
+    for (const p in projectCols) {
       const col = projectCols[p];
-      if (col === undefined) continue;
       const val = String(row[col] == null ? "" : row[col]).trim();
       if (isSignupMark(val)) {
         projects.add(p);
@@ -491,6 +492,20 @@ function renderCheckResult() {
   }
 }
 
+/* 获取动态项目排序后的列表 */
+function getProjectOrder() {
+  const arr = Array.from(dynamicProjects);
+  arr.sort((a, b) => {
+    const ia = PROJECT_PRIORITY.indexOf(a);
+    const ib = PROJECT_PRIORITY.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  return arr;
+}
+
 function renderTable1() {
   const classMap = {};
   allRecords.forEach(rec => {
@@ -508,8 +523,10 @@ function renderTable1() {
 }
 
 function renderTable2() {
+  const projectOrder = getProjectOrder();
+
   const projectMap = {};
-  PROJECT_ORDER.forEach(p => {
+  projectOrder.forEach(p => {
     projectMap[p] = {};
   });
 
@@ -523,21 +540,21 @@ function renderTable2() {
   });
 
   const allGroups = new Set();
-  PROJECT_ORDER.forEach(p => {
+  projectOrder.forEach(p => {
     Object.keys(projectMap[p] || {}).forEach(g => allGroups.add(g));
   });
 
   const groupNames = Array.from(allGroups).sort((a, b) => groupOrder(a) - groupOrder(b));
 
   let header = "组别";
-  PROJECT_ORDER.forEach(p => {
+  projectOrder.forEach(p => {
     header += "\t" + p;
   });
   let text = header + "\n";
 
   groupNames.forEach(g => {
     let line = g;
-    PROJECT_ORDER.forEach(p => {
+    projectOrder.forEach(p => {
       const set = projectMap[p] && projectMap[p][g] ? projectMap[p][g] : new Set();
       line += "\t" + (set.size > 0 ? set.size : "/");
     });
@@ -640,9 +657,10 @@ function renderClassResult() {
 
 function renderProjectResult() {
   const el = document.getElementById("projectResult");
+  const projectOrder = getProjectOrder();
 
   const projectMap = {};
-  PROJECT_ORDER.forEach(p => {
+  projectOrder.forEach(p => {
     projectMap[p] = {};
   });
 
@@ -659,7 +677,7 @@ function renderProjectResult() {
 
   html += `<table class="output-table" style="width:${9 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
 
-  PROJECT_ORDER.forEach((p, pIndex) => {
+  projectOrder.forEach((p, pIndex) => {
     const groups = projectMap[p] || {};
     const groupNames = Object.keys(groups).sort((a, b) => groupOrder(a) - groupOrder(b));
     let total = 0;
@@ -672,15 +690,16 @@ function renderProjectResult() {
       groupNames.forEach((g, idx) => {
         const names = Array.from(groups[g].keys());
 
-        // 该组别内去重后的班级数量 = 队伍数量
         const teamCount = new Set(names.map(name => groups[g].get(name).className)).size;
-let teamText = "";
-if (teamCount > 3) {
-  teamText = `　　　　${teamCount}队1组取前${teamCount - 1}名`;
-} else {
-  teamText = `　　　　${teamCount}队1组，全部录取并评定1-${teamCount}名`;
-}
-html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）${teamText}`);
+
+        let teamText = "";
+        if (teamCount > 3) {
+          teamText = `　　　　${teamCount}队1组取前${teamCount - 1}名`;
+        } else {
+          teamText = `　　　　${teamCount}队1组，全部录取并评定1-${teamCount}名`;
+        }
+
+        html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）${teamText}`);
 
         html += buildRelayHeaderRow();
 
@@ -692,22 +711,44 @@ html += buildTitleRow(`${idx + 1}、${g}（${names.length}人）${teamText}`);
 
         const classList = Array.from(classSet).sort((a, b) => classOrder(a) - classOrder(b));
 
-        const perRow = 6;
-        const rows = [];
-        for (let i = 0; i < classList.length; i += perRow) {
-          rows.push(classList.slice(i, i + perRow));
-        }
+        if (classList.length >= 7) {
+          const group1 = classList.slice(0, 5);
+          let group2 = classList.slice(5);
 
-        if (rows.length >= 2 && rows[rows.length - 1].length === 1) {
-          const last = rows.pop();
-          rows[rows.length - 1] = rows[rows.length - 1].concat(last);
-        }
+          if (group2.length === 1) {
+            const last = group1.pop();
+            group2.unshift(last);
+          }
 
-        let rowIndex = 1;
-        rows.forEach(chunk => {
-          html += buildRelayClassRow(rowIndex, chunk);
-          rowIndex++;
-        });
+          if (group2.length > 7) {
+            const extra = group2.slice(7);
+            group2 = group2.slice(0, 7);
+
+            html += buildRelayClassRow(1, group1);
+            html += buildRelayClassRow(2, group2);
+            html += buildRelayClassRow(3, extra);
+          } else {
+            html += buildRelayClassRow(1, group1);
+            html += buildRelayClassRow(2, group2);
+          }
+        } else {
+          const perRow = 6;
+          const rows = [];
+          for (let i = 0; i < classList.length; i += perRow) {
+            rows.push(classList.slice(i, i + perRow));
+          }
+
+          if (rows.length >= 2 && rows[rows.length - 1].length === 1) {
+            const last = rows.pop();
+            rows[rows.length - 1] = rows[rows.length - 1].concat(last);
+          }
+
+          let rowIndex = 1;
+          rows.forEach(chunk => {
+            html += buildRelayClassRow(rowIndex, chunk);
+            rowIndex++;
+          });
+        }
       });
     } else {
       groupNames.forEach((g, idx) => {
