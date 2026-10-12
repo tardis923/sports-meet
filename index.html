@@ -138,7 +138,7 @@
 const FONT_FAMILY = "宋体";
 const FONT_SIZE_TITLE = "10.5pt";
 const FONT_SIZE_NAME = "10.5pt";
-const TABLE_COLS = 9;
+const TABLE_COLS = 8;
 const COL_WIDTH_CM = "1.9cm";
 
 /* ---------- 忽略列：这些列不是项目列 ---------- */
@@ -635,7 +635,7 @@ function renderClassResult() {
   const classNames = Object.keys(classMap).sort((a, b) => classOrder(a) - classOrder(b));
   let html = "";
 
-  html += `<table class="output-table" style="width:${9 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
+  html += `<table class="output-table" style="width:${8 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
 
   classNames.forEach(cls => {
     const names = Array.from(classMap[cls].keys());
@@ -675,7 +675,7 @@ function renderProjectResult() {
 
   let html = "";
 
-  html += `<table class="output-table" style="width:${9 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
+  html += `<table class="output-table" style="width:${8 * 1.9}cm;margin:0;padding:0;border-collapse:collapse;table-layout:fixed;">`;
 
   projectOrder.forEach((p, pIndex) => {
     const groups = projectMap[p] || {};
