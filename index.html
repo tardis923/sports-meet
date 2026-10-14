@@ -101,7 +101,15 @@
 
 <div class="box">
   <h3>1. 上传报名表</h3>
-  
+  <p class="small">
+    可一次选择多个 Excel 文件。规则：单表内同名合并项目；同一文件中男女表同名才提示。
+    班级名称中的括号统一用中文全角括号（），没有括号的自动补括号；没有“班”字的自动补“班”。
+    人名、班级、组别中的所有空白字符都会去掉。
+    组别名称保留“年级”两个字；没有“年级”的会自动补上；低年级男子组自动视为小学低年级男子组，高年级男子组自动视为小学高年级男子组。
+    项目列动态识别：除序号、姓名、班级、组别等忽略列外，其他列都作为项目列。
+    如果有“班主任名单”工作表或文件，班级名单中会自动加入“领队：班主任姓名”。
+    排序：小学低年级→小学高年级→初一年级→初二年级→初三年级→高一年级→高二年级→高三年级；每组内先男后女。
+  </p>
   <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
   <br>
   <button onclick="run()">开始检查并统计</button>
@@ -114,22 +122,22 @@
 </div>
 
 <div class="result-block">
-  <h3>3. 表1：班级 + 班级报名人数</h3>
+  <h3>3. 表1：班级 + 班级报名人数（可复制粘贴到表格）</h3>
   <pre id="table1Text" class="copy-area">尚未统计。</pre>
 </div>
 
 <div class="result-block">
-  <h3>4. 表2：组别 + 各项目报名人数</h3>
+  <h3>4. 表2：组别 + 各项目报名人数（可复制粘贴到表格，无人数的用 /）</h3>
   <pre id="table2Text" class="copy-area">尚未统计。</pre>
 </div>
 
 <div class="result-block">
-  <h3>5. 班级运动员名单</h3>
+  <h3>5. 每个班级运动员名单 + 人数（一个表格，8列，每列1.9cm）</h3>
   <div id="classResult">尚未统计。</div>
 </div>
 
 <div class="result-block">
-  <h3>6. 项目分组名单</h3>
+  <h3>6. 项目分组名单 + 项目总人数 + 组别人数（一个表格，8列，每列1.9cm）</h3>
   <div id="projectResult">尚未统计。</div>
 </div>
 
@@ -284,18 +292,11 @@ function parseSheet(fileName, sheetName, rows) {
     if (!headerName) return;
     if (IGNORE_HEADERS.includes(headerName)) return;
 
-    // 排除姓名、班级、组别所在列
     if (idx === idxName || idx === idxClass || idx === idxGroup) return;
 
-    // 作为项目列
     projectCols[headerName] = idx;
     dynamicProjects.add(headerName);
   });
-
-  let gender = "未知";
-  const sheetText = sheetName + " " + header.join(" ");
-  if (sheetText.includes("女子")) gender = "女";
-  else if (sheetText.includes("男子")) gender = "男";
 
   for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
@@ -307,6 +308,11 @@ function parseSheet(fileName, sheetName, rows) {
 
     if (!name || !rawClassName) continue;
     if (name === "姓名" || rawClassName === "班级") continue;
+
+    // 性别只根据组别列判断，不再看工作表名
+    let gender = "未知";
+    if (rawGroup.includes("女子")) gender = "女";
+    else if (rawGroup.includes("男子")) gender = "男";
 
     const projects = new Set();
     for (const p in projectCols) {
@@ -597,13 +603,10 @@ function buildRelayHeaderRow() {
 function buildRelayClassRow(index, classList) {
   let html = `<tr>`;
 
-  // 第1列：组/道次编号
   html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${index}</td>`;
 
-  // 第2列：道次一留空
   html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;"></td>`;
 
-  // 第3—8列：道次二到道次七，最多6个班级
   for (let i = 0; i < 6; i++) {
     const cls = classList[i] || "";
     html += `<td style="width:${COL_WIDTH_CM};font-family:${FONT_FAMILY};font-size:${FONT_SIZE_NAME};border:none;padding:1px 2px;text-align:center;word-break:break-all;">${escapeHtml(cls)}</td>`;
